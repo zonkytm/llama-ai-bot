@@ -1,0 +1,56 @@
+name: CI/CD Pipeline for Llama AI Telegram Bot
+
+on:
+  push:
+    branches:
+      - prod 
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Add SSH key to known_hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H $REMOTE_HOST >> ~/.ssh/known_hosts
+      env:
+        REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+
+    - name: Deploy to server
+      env:
+        SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+        REMOTE_USER: ${{ secrets.REMOTE_USER }}
+        REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+        BOT_PATH: ${{ secrets.BOT_PATH }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y sshpass
+        sshpass -p $SSH_PASSWORD scp -r * $REMOTE_USER@$REMOTE_HOST:$BOT_PATH
+        sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
+          cd $BOT_PATH &&
+          python3 -m venv venv &&
+          source venv/bin/activate &&
+          pip install --upgrade pip &&
+          pip install -r requirements.txt &&
+          systemctl restart llama-ai-bot.service  # Предполагаемое имя сервиса, измените под ваше
+        "
