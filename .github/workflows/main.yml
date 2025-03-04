@@ -3,7 +3,7 @@ name: CI/CD Pipeline for Llama AI Telegram Bot
 on:
   push:
     branches:
-      - prod 
+      - prod
 
 jobs:
   build:
@@ -34,23 +34,29 @@ jobs:
         mkdir -p ~/.ssh
         ssh-keyscan -H $REMOTE_HOST >> ~/.ssh/known_hosts
       env:
-        REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+        REMOTE_HOST: ${{ secrets.HOST }}
 
     - name: Deploy to server
       env:
         SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
-        REMOTE_USER: ${{ secrets.REMOTE_USER }}
-        REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+        REMOTE_USER: ${{ secrets.USER }}
+        REMOTE_HOST: ${{ secrets.HOST }}
         BOT_PATH: ${{ secrets.BOT_PATH }}
       run: |
         sudo apt-get update
         sudo apt-get install -y sshpass
+        # Копируем весь проект, включая .env и requirements.txt
         sshpass -p $SSH_PASSWORD scp -r * $REMOTE_USER@$REMOTE_HOST:$BOT_PATH
         sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
           cd $BOT_PATH &&
-          python3 -m venv venv &&
+          # Проверяем, существует ли venv, и создаём только если нет
+          if [ ! -d venv ]; then
+            python3.11 -m venv venv
+          fi &&
           source venv/bin/activate &&
           pip install --upgrade pip &&
-          pip install -r requirements.txt &&
-          systemctl restart llama-ai-bot.service  # Предполагаемое имя сервиса, измените под ваше
+          pip install --upgrade --force-reinstall -r requirements.txt &&
+          # Загружаем переменные из .env (если используется)
+          set -a && source .env && set +a &&
+          systemctl restart llama-ai-bot.service
         "
