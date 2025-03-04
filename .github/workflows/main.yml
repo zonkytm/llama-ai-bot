@@ -28,9 +28,12 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Полная история для точного деплоя
 
     - name: Add SSH key to known_hosts
       run: |
+        echo "Adding $REMOTE_HOST to known_hosts"
         mkdir -p ~/.ssh
         ssh-keyscan -H $REMOTE_HOST >> ~/.ssh/known_hosts
       env:
@@ -43,18 +46,18 @@ jobs:
         REMOTE_HOST: ${{ secrets.HOST }}
         BOT_PATH: ${{ secrets.BOT_PATH }}  # Указано как /root/llama-ai-bot в секретах
       run: |
+        echo "Starting deployment to $REMOTE_HOST:$BOT_PATH"
         sudo apt-get update
+        echo "Updating package lists completed"
         sudo apt-get install -y sshpass
+        echo "Installing sshpass completed"
         echo "Copying files to $REMOTE_HOST:$BOT_PATH"
-        # Копируем все файлы, включая скрытые
-        sshpass -p $SSH_PASSWORD scp -r .[!.]* ./* $REMOTE_USER@$REMOTE_HOST:$BOT_PATH
+        sshpass -p $SSH_PASSWORD scp -r .[!.]* ./* $REMOTE_USER@$REMOTE_HOST:$BOT_PATH || { echo "SCP failed"; exit 1; }
+        echo "File copy completed"
+        echo "Executing commands on $REMOTE_HOST"
         sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
           echo 'Entering directory $BOT_PATH'
-          if [ ! -d $BOT_PATH ]; then
-            echo 'Creating directory $BOT_PATH'
-            mkdir -p $BOT_PATH
-          fi &&
-          cd $BOT_PATH || { echo 'Failed to enter directory'; exit 1; } &&
+          cd $BOT_PATH || { echo 'Failed to enter directory $BOT_PATH'; exit 1; } &&
           echo 'Checking virtual environment'
           if [ ! -d venv ]; then
             echo 'Creating new virtual environment'
@@ -62,14 +65,17 @@ jobs:
           else
             echo 'Virtual environment exists, skipping creation'
           fi &&
+          echo 'Activating virtual environment'
           source venv/bin/activate &&
-          echo 'Upgrading pip and installing dependencies'
-          pip install --upgrade pip &&
+          echo 'Upgrading pip'
+          pip install --upgrade pip || { echo 'Failed to upgrade pip'; exit 1; } &&
+          echo 'Installing dependencies'
           pip install --upgrade --force-reinstall -r requirements.txt || { echo 'Failed to install dependencies'; exit 1; } &&
           echo 'Loading environment variables from .env'
-          set -a && source .env && set +a &&
+          set -a && source .env && set +a || { echo 'Failed to load .env'; exit 1; } &&
           echo 'Restarting service'
           systemctl restart llama-ai-bot.service || { echo 'Failed to restart service'; exit 1; } &&
-          echo 'Deployment completed'
+          echo 'Deployment completed successfully'
           systemctl status llama-ai-bot.service --no-pager
-        "
+        " || { echo "SSH command failed"; exit 1; }
+          echo "Deployment process finished"
