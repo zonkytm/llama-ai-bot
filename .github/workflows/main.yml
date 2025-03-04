@@ -1,80 +1,58 @@
-name: CI/CD Pipeline for Llama AI Telegram Bot
-
-on:
-  push:
-    branches:
-      - prod
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-  deploy:
+deploy:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Полная история для точного деплоя
 
-      - name: Add SSH key to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.HOST }} >> ~/.ssh/known_hosts
-        env:
-          REMOTE_HOST: ${{ secrets.HOST }}
+    - name: Add SSH key to known_hosts
+      run: |
+        echo "Adding $REMOTE_HOST to known_hosts"
+        mkdir -p ~/.ssh
+        ssh-keyscan -H $REMOTE_HOST >> ~/.ssh/known_hosts
+      env:
+        REMOTE_HOST: ${{ secrets.HOST }}
 
-      - name: Deploy to server
-        env:
-          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
-          REMOTE_USER: ${{ secrets.USER }}
-          REMOTE_HOST: ${{ secrets.HOST }}
-          BOT_PATH: ${{ secrets.BOT_PATH }}
-          PORT: ${{ secrets.PORT }}  # Добавляем порт как переменную для отладки
-        run: |
-          echo "Debug: REMOTE_HOST=$REMOTE_HOST"
-          echo "Debug: REMOTE_USER=$REMOTE_USER"
-          echo "Debug: BOT_PATH=$BOT_PATH"
-          echo "Debug: PORT=$PORT"
-          sudo apt-get update
-          sudo apt-get install -y sshpass openssh-client
-          echo "Attempting SSH connection..."
-          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -p "$PORT" "$REMOTE_USER@$REMOTE_HOST" << 'EOF'
-            echo "Connected to server, current directory: $(pwd)"
-            cd "$BOT_PATH" || { echo "Error: Directory $BOT_PATH not found"; exit 1; }
-            echo "Pulling latest changes from prod branch..."
-            git fetch origin
-            git checkout prod
-            git pull origin prod
-            # Проверяем, существует ли venv, и создаём только если нет
-            if [ ! -d venv ]; then
-              echo "Creating virtual environment..."
-              python3.11 -m venv venv
-            fi
-            source venv/bin/activate
-            pip install --upgrade pip
-            pip install --upgrade --force-reinstall -r requirements.txt
-            # Загружаем переменные из .env (если используется)
-            if [ -f .env ]; then
-              echo "Loading .env file..."
-              set -a && source .env && set +a
-            fi
-            echo "Reloading systemd daemon..."
-            sudo systemctl daemon-reload
-            echo "Restarting service llama-ai-bot.service..."
-            sudo systemctl restart llama-ai-bot.service
-            echo "Checking service status..."
-            sudo systemctl status llama-ai-bot.service --no-pager
-          EOF
+    - name: Deploy to server
+      env:
+        SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+        REMOTE_USER: ${{ secrets.USER }}
+        REMOTE_HOST: ${{ secrets.HOST }}
+        BOT_PATH: ${{ secrets.BOT_PATH }}  # Указано как /root/llama-ai-bot в секретах
+      run: |
+        echo "Starting deployment to $REMOTE_HOST:$BOT_PATH"
+        sudo apt-get update
+        echo "Updating package lists completed"
+        sudo apt-get install -y sshpass
+        echo "Installing sshpass completed"
+        echo "Pulling latest changes from Git on $REMOTE_HOST:$BOT_PATH"
+        sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
+          echo 'Entering directory $BOT_PATH'
+          cd $BOT_PATH || { echo 'Failed to enter directory $BOT_PATH'; exit 1; } &&
+          echo 'Pulling latest changes from prod branch'
+          git fetch origin &&
+          git checkout prod &&
+          git pull origin prod || { echo 'Failed to pull from Git'; exit 1; } &&
+          echo 'Checking virtual environment'
+          if [ ! -d venv ]; then
+            echo 'Creating new virtual environment'
+            python3.11 -m venv venv || { echo 'Failed to create venv'; exit 1; }
+          else
+            echo 'Virtual environment exists, skipping creation'
+          fi &&
+          echo 'Activating virtual environment'
+          source venv/bin/activate &&
+          echo 'Upgrading pip'
+          pip install --upgrade pip || { echo 'Failed to upgrade pip'; exit 1; } &&
+          echo 'Installing dependencies'
+          pip install --upgrade --force-reinstall -r requirements.txt || { echo 'Failed to install dependencies'; exit 1; } &&
+          echo 'Loading environment variables from .env'
+          set -a && source .env && set +a || { echo 'Failed to load .env'; exit 1; } &&
+          echo 'Restarting service'
+          systemctl restart llama-ai-bot.service || { echo 'Failed to restart service'; exit 1; } &&
+          echo 'Deployment completed successfully'
+          systemctl status llama-ai-bot.service --no-pager
+        " || { echo "SSH command failed"; exit 1; }
+        echo "Deployment process finished"
