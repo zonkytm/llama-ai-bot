@@ -5,11 +5,9 @@ import handlers
 import repository
 import os
 
-
 API_TOKEN = os.environ.get("bot_api_token")
 
 logging.basicConfig(level=logging.INFO)
-
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
