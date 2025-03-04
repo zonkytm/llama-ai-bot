@@ -1,76 +1,71 @@
-name: Deploy Telegram Bot
+name: CI/CD Pipeline for Llama AI Telegram Bot
 
-# Триггеры: запуск при пушах в ветку prod или при создании тегов
 on:
   push:
     branches:
       - prod
-  workflow_dispatch: # Позволяет запускать вручную
-
-# Ограничение: секреты и переменные не передаются при pull request из форка
-env:
-  LOCAL_BOT_PATH: llama-ai-bot  # Относительный путь для локальной среды Actions
-  SERVER_BOT_PATH: ${{ secrets.BOT_PATH }}  # Путь на сервере
-  HOST: ${{ secrets.HOST }}
-  PORT: ${{ secrets.PORT }}
-  SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
-  USERNAME: ${{ secrets.USERNAME }}
-  SERVICE_NAME: llama-ai-bot  # Имя сервиса
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build  # Запуск деплоя после успешной сборки
-    steps:
-      # Проверка кода из репозитория (ветка prod)
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          ref: prod # Указываем ветку prod
+          python-version: '3.11'
 
-      # Скачивание артефакта сборки (опционально)
-      - name: Download artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: telegram-bot-artifact
-          path: ${{ env.LOCAL_BOT_PATH }}/dist
-
-      # Установка SSH-клиента
-      - name: Install SSH client
-        run: sudo apt-get update && sudo apt-get install -y openssh-client sshpass
-
-      # Деплой на сервер через SSH
-      - name: Deploy to Server
+      - name: Install dependencies
         run: |
-          echo "Connecting to $HOST..."
-          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $USERNAME@$HOST -p $PORT << 'EOF'
-            cd $SERVER_BOT_PATH
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Add SSH key to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.HOST }} >> ~/.ssh/known_hosts
+        env:
+          REMOTE_HOST: ${{ secrets.HOST }}
+
+      - name: Deploy to server
+        env:
+          SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+          REMOTE_USER: ${{ secrets.USER }}
+          REMOTE_HOST: ${{ secrets.HOST }}
+          BOT_PATH: ${{ secrets.BOT_PATH }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass openssh-client
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST -p ${{ secrets.PORT }} << 'EOF'
+            cd $BOT_PATH
             echo "Pulling latest changes from prod branch..."
             git fetch origin
             git checkout prod
             git pull origin prod
-            echo "Installing dependencies..."
-            python3.11 -m pip install -r requirements.txt -q
+            # Проверяем, существует ли venv, и создаём только если нет
+            if [ ! -d venv ]; then
+              python3.11 -m venv venv
+            fi
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install --upgrade --force-reinstall -r requirements.txt
+            # Загружаем переменные из .env (если используется)
+            if [ -f .env ]; then
+              set -a && source .env && set +a
+            fi
             echo "Reloading systemd daemon..."
             sudo systemctl daemon-reload
-            echo "Restarting service $SERVICE_NAME..."
-            sudo systemctl restart $SERVICE_NAME
+            echo "Restarting service llama-ai-bot.service..."
+            sudo systemctl restart llama-ai-bot.service
             echo "Checking service status..."
-            sudo systemctl status $SERVICE_NAME --no-pager
+            sudo systemctl status llama-ai-bot.service --no-pager
           EOF
