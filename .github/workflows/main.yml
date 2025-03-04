@@ -9,17 +9,17 @@ on:
 
 # Ограничение: секреты и переменные не передаются при pull request из форка
 env:
-  BOT_PATH: ${{ secrets.BOT_PATH }}
+  LOCAL_BOT_PATH: llama-ai-bot  # Относительный путь для локальной среды Actions
+  SERVER_BOT_PATH: ${{ secrets.BOT_PATH }}  # Путь на сервере
   HOST: ${{ secrets.HOST }}
   PORT: ${{ secrets.PORT }}
   SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
   USERNAME: ${{ secrets.USERNAME }}
-  SERVICE_NAME: llama-ai-bot
+  SERVICE_NAME: llama-ai-bot  # Имя сервиса
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-
     steps:
       # Проверка кода из репозитория (ветка prod)
       - name: Checkout code
@@ -33,12 +33,44 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Установка зависимостей
-      - name: Install dependencies
+      # Установка зависимостей для сборки
+      - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-        working-directory: ${{ env.BOT_PATH }}
+          pip install pyinstaller  # Пример: установка pyinstaller для сборки
+        working-directory: ${{ env.LOCAL_BOT_PATH }}
+
+      # Сборка проекта (пример с pyinstaller)
+      - name: Build project
+        run: |
+          echo "Building the project..."
+          pyinstaller --onefile main.py --name telegram-bot
+        working-directory: ${{ env.LOCAL_BOT_PATH }}
+
+      # Сохранение артефакта (опционально)
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: telegram-bot-artifact
+          path: ${{ env.LOCAL_BOT_PATH }}/dist/telegram-bot
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build  # Запуск деплоя после успешной сборки
+    steps:
+      # Проверка кода из репозитория (ветка prod)
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: prod # Указываем ветку prod
+
+      # Скачивание артефакта сборки (опционально)
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: telegram-bot-artifact
+          path: ${{ env.LOCAL_BOT_PATH }}/dist
 
       # Установка SSH-клиента
       - name: Install SSH client
@@ -49,7 +81,7 @@ jobs:
         run: |
           echo "Connecting to $HOST..."
           sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $USERNAME@$HOST -p $PORT << 'EOF'
-            cd $BOT_PATH
+            cd $SERVER_BOT_PATH
             echo "Pulling latest changes from prod branch..."
             git fetch origin
             git checkout prod
