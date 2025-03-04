@@ -11,6 +11,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Полная история для точного деплоя
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -28,8 +30,6 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
-      with:
-        fetch-depth: 0  # Полная история для точного деплоя
 
     - name: Add SSH key to known_hosts
       run: |
@@ -51,6 +51,15 @@ jobs:
         echo "Updating package lists completed"
         sudo apt-get install -y sshpass
         echo "Installing sshpass completed"
+        echo "Creating directory $BOT_PATH if it does not exist"
+        sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
+          if [ ! -d $BOT_PATH ]; then
+            echo 'Creating directory $BOT_PATH'
+            mkdir -p $BOT_PATH || { echo 'Failed to create directory'; exit 1; }
+          else
+            echo 'Directory $BOT_PATH already exists'
+          fi
+        "
         echo "Copying files to $REMOTE_HOST:$BOT_PATH"
         sshpass -p $SSH_PASSWORD scp -r .[!.]* ./* $REMOTE_USER@$REMOTE_HOST:$BOT_PATH || { echo "SCP failed"; exit 1; }
         echo "File copy completed"
@@ -78,4 +87,4 @@ jobs:
           echo 'Deployment completed successfully'
           systemctl status llama-ai-bot.service --no-pager
         " || { echo "SSH command failed"; exit 1; }
-          echo "Deployment process finished"
+      echo "Deployment process finished"
