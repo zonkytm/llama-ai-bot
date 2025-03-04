@@ -41,9 +41,6 @@ async def split_and_send_message(replycontent, message : types.Message):
     for i in range (0, len(replycontent), max_length):
         await message.reply(replycontent[i: i+ max_length])
 
-async def delete_command(message: types.Message):
-    await message.delete()
-
 
 async def handle_user_text_request(message: types.Message, bot):
     try:
@@ -55,7 +52,7 @@ async def handle_user_text_request(message: types.Message, bot):
         # Формируем URL и заголовки для API
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
-            "Authorization": "Bearer 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",
+            "Authorization": "Bearer " + os.environ.get("api_token"),
             "Content-Type": "application/json"
         }
 
@@ -68,7 +65,7 @@ async def handle_user_text_request(message: types.Message, bot):
         }
         # Формируем тело запроса
         payload = {
-            "model": "deepseek/deepseek-r1:free",
+            "model": "deepseek/deepseek-chat:free",
             "messages": [
                 system_message,
                 {
@@ -78,11 +75,13 @@ async def handle_user_text_request(message: types.Message, bot):
             ]
         }
 
+
         # Отправляем запрос к API
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as response:
                 if response.status != 200:
                     await message.reply("Не удалось обработать запрос. Попробуйте позже.")
+                    print(response.status)
                     return
 
                 # Обрабатываем ответ от API
