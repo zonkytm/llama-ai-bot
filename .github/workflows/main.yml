@@ -41,19 +41,35 @@ jobs:
         SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
         REMOTE_USER: ${{ secrets.USER }}
         REMOTE_HOST: ${{ secrets.HOST }}
-        BOT_PATH: ${{ secrets.BOT_PATH }}
+        BOT_PATH: ${{ secrets.BOT_PATH }}  # Указано как /root/llama-ai-bot в секретах
       run: |
         sudo apt-get update
         sudo apt-get install -y sshpass
-        sshpass -p $SSH_PASSWORD scp -r * $REMOTE_USER@$REMOTE_HOST:$BOT_PATH
+        echo "Copying files to $REMOTE_HOST:$BOT_PATH"
+        # Копируем все файлы, включая скрытые
+        sshpass -p $SSH_PASSWORD scp -r .[!.]* ./* $REMOTE_USER@$REMOTE_HOST:$BOT_PATH
         sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
-          cd $BOT_PATH &&
+          echo 'Entering directory $BOT_PATH'
+          if [ ! -d $BOT_PATH ]; then
+            echo 'Creating directory $BOT_PATH'
+            mkdir -p $BOT_PATH
+          fi &&
+          cd $BOT_PATH || { echo 'Failed to enter directory'; exit 1; } &&
+          echo 'Checking virtual environment'
           if [ ! -d venv ]; then
-            python3.11 -m venv venv
+            echo 'Creating new virtual environment'
+            python3.11 -m venv venv || { echo 'Failed to create venv'; exit 1; }
+          else
+            echo 'Virtual environment exists, skipping creation'
           fi &&
           source venv/bin/activate &&
+          echo 'Upgrading pip and installing dependencies'
           pip install --upgrade pip &&
-          pip install --upgrade --force-reinstall -r requirements.txt &&
+          pip install --upgrade --force-reinstall -r requirements.txt || { echo 'Failed to install dependencies'; exit 1; } &&
+          echo 'Loading environment variables from .env'
           set -a && source .env && set +a &&
-          systemctl restart llama-ai-bot.service
+          echo 'Restarting service'
+          systemctl restart llama-ai-bot.service || { echo 'Failed to restart service'; exit 1; } &&
+          echo 'Deployment completed'
+          systemctl status llama-ai-bot.service --no-pager
         "
