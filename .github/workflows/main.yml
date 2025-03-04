@@ -36,7 +36,7 @@ jobs:
       with:
         host: ${{ secrets.HOST }}
         username: ${{ secrets.USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        key: ${{ secrets.SSH_PASSWORD }}
         port: ${{ secrets.PORT }}  # Опционально, по умолчанию 22
         script: |
           echo "Starting deployment to $HOST:${{ secrets.BOT_PATH }}"
