@@ -42,17 +42,25 @@ jobs:
           REMOTE_USER: ${{ secrets.USER }}
           REMOTE_HOST: ${{ secrets.HOST }}
           BOT_PATH: ${{ secrets.BOT_PATH }}
+          PORT: ${{ secrets.PORT }}  # Добавляем порт как переменную для отладки
         run: |
+          echo "Debug: REMOTE_HOST=$REMOTE_HOST"
+          echo "Debug: REMOTE_USER=$REMOTE_USER"
+          echo "Debug: BOT_PATH=$BOT_PATH"
+          echo "Debug: PORT=$PORT"
           sudo apt-get update
           sudo apt-get install -y sshpass openssh-client
-          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST -p ${{ secrets.PORT }} << 'EOF'
-            cd $BOT_PATH
+          echo "Attempting SSH connection..."
+          sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no -p "$PORT" "$REMOTE_USER@$REMOTE_HOST" << 'EOF'
+            echo "Connected to server, current directory: $(pwd)"
+            cd "$BOT_PATH" || { echo "Error: Directory $BOT_PATH not found"; exit 1; }
             echo "Pulling latest changes from prod branch..."
             git fetch origin
             git checkout prod
             git pull origin prod
             # Проверяем, существует ли venv, и создаём только если нет
             if [ ! -d venv ]; then
+              echo "Creating virtual environment..."
               python3.11 -m venv venv
             fi
             source venv/bin/activate
@@ -60,6 +68,7 @@ jobs:
             pip install --upgrade --force-reinstall -r requirements.txt
             # Загружаем переменные из .env (если используется)
             if [ -f .env ]; then
+              echo "Loading .env file..."
               set -a && source .env && set +a
             fi
             echo "Reloading systemd daemon..."
