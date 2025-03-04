@@ -45,18 +45,15 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y sshpass
-        # Копируем весь проект, включая .env и requirements.txt
         sshpass -p $SSH_PASSWORD scp -r * $REMOTE_USER@$REMOTE_HOST:$BOT_PATH
         sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
           cd $BOT_PATH &&
-          # Проверяем, существует ли venv, и создаём только если нет
           if [ ! -d venv ]; then
             python3.11 -m venv venv
           fi &&
           source venv/bin/activate &&
           pip install --upgrade pip &&
           pip install --upgrade --force-reinstall -r requirements.txt &&
-          # Загружаем переменные из .env (если используется)
           set -a && source .env && set +a &&
           systemctl restart llama-ai-bot.service
         "
