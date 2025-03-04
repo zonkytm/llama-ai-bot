@@ -12,7 +12,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
-        fetch-depth: 0
+        fetch-depth: 0  # Полная история для точного деплоя
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -31,43 +31,60 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    - name: Add SSH key to known_hosts
+      run: |
+        echo "Adding $REMOTE_HOST to known_hosts"
+        mkdir -p ~/.ssh
+        ssh-keyscan -H $REMOTE_HOST >> ~/.ssh/known_hosts
+      env:
+        REMOTE_HOST: ${{ secrets.HOST }}
+
     - name: Deploy to server
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.HOST }}
-        username: ${{ secrets.USER }}
-        key: ${{ secrets.SSH_PASSWORD }}
-        port: ${{ secrets.PORT }}  # Опционально, по умолчанию 22
-        script: |
-          echo "Starting deployment to $HOST:${{ secrets.BOT_PATH }}"
-          if [ ! -d ${{ secrets.BOT_PATH }} ]; then
-            echo "Creating directory ${{ secrets.BOT_PATH }}"
-            mkdir -p ${{ secrets.BOT_PATH }} || { echo 'Failed to create directory'; exit 1; }
+      env:
+        SSH_PASSWORD: ${{ secrets.SSH_PASSWORD }}
+        REMOTE_USER: ${{ secrets.USER }}
+        REMOTE_HOST: ${{ secrets.HOST }}
+        BOT_PATH: ${{ secrets.BOT_PATH }}  # Указано как /root/llama-ai-bot в секретах
+      run: |
+        echo "Starting deployment to $REMOTE_HOST:$BOT_PATH"
+        sudo apt-get update
+        echo "Updating package lists completed"
+        sudo apt-get install -y sshpass
+        echo "Installing sshpass completed"
+        echo "Creating directory $BOT_PATH if it does not exist"
+        sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
+          if [ ! -d $BOT_PATH ]; then
+            echo 'Creating directory $BOT_PATH'
+            mkdir -p $BOT_PATH || { echo 'Failed to create directory'; exit 1; }
           else
-            echo "Directory ${{ secrets.BOT_PATH }} already exists"
+            echo 'Directory $BOT_PATH already exists'
           fi
-          cd ${{ secrets.BOT_PATH }} || { echo 'Failed to enter directory'; exit 1; }
-          echo "Copying files from GitHub to ${{ secrets.BOT_PATH }}"
-          git pull origin prod || { echo 'Git pull failed'; exit 1; }
-          echo "Checking virtual environment"
+        "
+        echo "Copying files to $REMOTE_HOST:$BOT_PATH"
+        sshpass -p $SSH_PASSWORD scp -r .[!.]* ./* $REMOTE_USER@$REMOTE_HOST:$BOT_PATH || { echo "SCP failed"; exit 1; }
+        echo "File copy completed"
+        echo "Executing commands on $REMOTE_HOST"
+        sshpass -p $SSH_PASSWORD ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST "
+          echo 'Entering directory $BOT_PATH'
+          cd $BOT_PATH || { echo 'Failed to enter directory $BOT_PATH'; exit 1; } &&
+          echo 'Checking virtual environment'
           if [ ! -d venv ]; then
-            echo "Creating new virtual environment"
+            echo 'Creating new virtual environment'
             python3.11 -m venv venv || { echo 'Failed to create venv'; exit 1; }
           else
-            echo "Virtual environment exists, skipping creation"
-          fi
-          echo "Activating virtual environment"
-          source venv/bin/activate
-          echo "Upgrading pip"
-          pip install --upgrade pip || { echo 'Failed to upgrade pip'; exit 1; }
-          echo "Installing dependencies"
-          pip install --upgrade --force-reinstall -r requirements.txt || { echo 'Failed to install dependencies'; exit 1; }
-          echo "Loading environment variables from .env"
-          set -a && source .env && set +a || { echo 'Failed to load .env'; exit 1; }
-          echo "Restarting service"
-          systemctl restart llama-ai-bot.service || { echo 'Failed to restart service'; exit 1; }
-          echo "Deployment completed successfully"
+            echo 'Virtual environment exists, skipping creation'
+          fi &&
+          echo 'Activating virtual environment'
+          source venv/bin/activate &&
+          echo 'Upgrading pip'
+          pip install --upgrade pip || { echo 'Failed to upgrade pip'; exit 1; } &&
+          echo 'Installing dependencies'
+          pip install --upgrade --force-reinstall -r requirements.txt || { echo 'Failed to install dependencies'; exit 1; } &&
+          echo 'Loading environment variables from .env'
+          set -a && source .env && set +a || { echo 'Failed to load .env'; exit 1; } &&
+          echo 'Restarting service'
+          systemctl restart llama-ai-bot.service || { echo 'Failed to restart service'; exit 1; } &&
+          echo 'Deployment completed successfully'
           systemctl status llama-ai-bot.service --no-pager
-      env:
-        HOST: ${{ secrets.HOST }}
-        BOT_PATH: ${{ secrets.BOT_PATH }}
+        " || { echo "SSH command failed"; exit 1; }
+          echo "Deployment process finished"
